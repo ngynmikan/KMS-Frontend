@@ -1,0 +1,334 @@
+import { useState, useEffect } from 'react';
+import { Search, Download, Send, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { paymentService, invoiceService } from '@/services';
+import { ApiPayment, ApiInvoice, RevenueSummary } from '@/types';
+import { Plus, History, FileText, AlertCircle } from 'lucide-react';
+
+export function BillingPage() {
+  const [payments, setPayments] = useState<ApiPayment[]>([]);
+  const [invoices, setInvoices] = useState<ApiInvoice[]>([]);
+  const [revenueSummary, setRevenueSummary] = useState<RevenueSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [activeTab, setActiveTab] = useState<'payments' | 'invoices'>('payments');
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [paymentsResp, invoicesResp, summaryResp] = await Promise.all([
+        paymentService.getAllPayments(),
+        invoiceService.getAllInvoices(),
+        paymentService.getRevenueSummary()
+      ]);
+      
+      if (paymentsResp) {
+        setPayments(paymentsResp);
+      }
+      
+      if (invoicesResp) {
+        setInvoices(invoicesResp);
+      }
+      
+      if (summaryResp) {
+        setRevenueSummary(summaryResp);
+      }
+    } catch (error) {
+      console.error('Error fetching billing data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredPayments = (payments || []).filter((payment: ApiPayment) => {
+    const studentName = payment.studentName || `Học sinh #${payment.invoiceId}`;
+    return studentName.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
+  const filteredInvoices = (invoices || []).filter((invoice: ApiInvoice) => {
+    const studentName = invoice.studentName || `Học sinh #${invoice.studentId}`;
+    const matchesSearch = studentName.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = filterStatus === 'all' || invoice.status === filterStatus;
+    return matchesSearch && matchesStatus;
+  });
+
+  const stats = {
+    totalTransactions: revenueSummary?.totalTransactions || payments.length,
+    totalRevenue: revenueSummary?.totalRevenue || 0,
+    paidAmount: payments.reduce((sum: number, p: ApiPayment) => sum + p.paidAmount, 0),
+  };
+
+  const handleExportPDF = (payment: ApiPayment) => {
+    alert(`Xuất phiếu thu PDF cho thanh toán #${payment.paymentNumber}`);
+  };
+
+  const handleInvoiceAction = (invoice: ApiInvoice) => {
+    alert(`Xem chi tiết hóa đơn ${invoice.invoiceNumber}`);
+  };
+
+  const handleSendReminder = () => {
+    const overdueCount = invoices.filter(i => i.status === 'Overdue').length;
+    alert(`Gửi thông báo nhắc học phí đến ${overdueCount} phụ huynh có hóa đơn quá hạn`);
+  };
+
+  const handleMarkOverdue = async () => {
+    try {
+      const resp = await invoiceService.markOverdue();
+      if (resp.success) {
+        alert('Đã cập nhật trạng thái quá hạn cho các hóa đơn trễ hạn');
+        fetchData();
+      }
+    } catch (error) {
+      console.error('Error marking overdue:', error);
+    }
+  };
+
+  const getInvoiceStatusBadge = (status: ApiInvoice['status']) => {
+    const statusMap: Record<ApiInvoice['status'], { label: string; className: string }> = {
+      Draft: { label: 'Nháp', className: 'bg-gray-100 text-gray-600' },
+      Sent: { label: 'Đã gửi', className: 'bg-blue-100 text-blue-600' },
+      Paid: { label: 'Đã đóng', className: 'bg-green-100 text-green-600' },
+      Partial: { label: 'Đóng một phần', className: 'bg-orange-100 text-orange-600' },
+      Overdue: { label: 'Quá hạn', className: 'bg-red-100 text-red-600' },
+      Cancelled: { label: 'Đã hủy', className: 'bg-gray-100 text-gray-400' },
+    };
+    const config = statusMap[status] || statusMap.Draft;
+    return <Badge className={`${config.className} border-none font-normal`}>{config.label}</Badge>;
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Quản lý Tài chính</h1>
+          <p className="text-muted-foreground mt-1">Theo dõi học phí và thanh toán</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleMarkOverdue}>
+            <AlertCircle className="w-4 h-4 mr-2" />
+            Quét quá hạn
+          </Button>
+          <Button onClick={handleSendReminder}>
+            <Send className="w-4 h-4 mr-2" />
+            Nhắc học phí
+          </Button>
+          <Button className="bg-green-600 hover:bg-green-700">
+            <Plus className="w-4 h-4 mr-2" />
+            Tạo hóa đơn
+          </Button>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <Card>
+          <CardContent className="p-6 text-center">
+            <div className="text-sm text-muted-foreground mb-1 uppercase tracking-wider font-semibold">Tổng doanh thu</div>
+            <div className="text-3xl font-bold text-primary">{stats.totalRevenue.toLocaleString('vi-VN')} đ</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-6 text-center">
+            <div className="text-sm text-muted-foreground mb-1 uppercase tracking-wider font-semibold">Tổng giao dịch</div>
+            <div className="text-3xl font-bold text-blue-600">{stats.totalTransactions}</div>
+          </CardContent>
+        </Card>
+        {revenueSummary?.byMethod.map((method) => (
+          <Card key={method.paymentMethod}>
+            <CardContent className="p-6 text-center">
+              <div className="text-sm text-muted-foreground mb-1 uppercase tracking-wider font-semibold">
+                Qua {method.paymentMethod}
+              </div>
+              <div className="text-2xl font-bold text-green-600">
+                {method.totalAmount.toLocaleString('vi-VN')} đ
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {method.count} giao dịch
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Date Range Info */}
+      <div className="flex justify-end gap-2 text-sm text-muted-foreground italic">
+        {revenueSummary && (
+          <span>Dữ liệu từ {new Date(revenueSummary.fromDate).toLocaleDateString('vi-VN')} đến {new Date(revenueSummary.toDate).toLocaleDateString('vi-VN')}</span>
+        )}
+      </div>
+
+      {/* Tabs switching */}
+      <div className="flex bg-gray-100 p-1 rounded-lg w-fit">
+        <button
+          onClick={() => setActiveTab('payments')}
+          className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'payments' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <History className="w-4 h-4 mr-2" />
+          Lịch sử Thanh toán
+        </button>
+        <button
+          onClick={() => setActiveTab('invoices')}
+          className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'invoices' ? 'bg-white shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <FileText className="w-4 h-4 mr-2" />
+          Quản lý Hóa đơn
+        </button>
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col md:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder={`Tìm kiếm theo tên học sinh trong ${activeTab === 'payments' ? 'thanh toán' : 'hóa đơn'}...`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            {activeTab === 'invoices' && (
+              <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                <option value="all">Tất cả trạng thái</option>
+                <option value="Draft">Bản nháp</option>
+                <option value="Sent">Đã gửi</option>
+                <option value="Paid">Đã đóng</option>
+                <option value="Partial">Đóng một phần</option>
+                <option value="Overdue">Quá hạn</option>
+              </Select>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>
+              {activeTab === 'payments' 
+                ? `Danh sách thanh toán (${filteredPayments.length})` 
+                : `Danh sách hóa đơn (${filteredInvoices.length})`}
+            </CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : activeTab === 'payments' ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Số Phiếu</TableHead>
+                  <TableHead>Học Sinh</TableHead>
+                  <TableHead>Số Hóa Đơn</TableHead>
+                  <TableHead>Phương Thức</TableHead>
+                  <TableHead>Số Tiền</TableHead>
+                  <TableHead>Ngày Đóng</TableHead>
+                  <TableHead>Người Thu</TableHead>
+                  <TableHead className="text-right">Thao Tác</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredPayments.map((payment: ApiPayment) => (
+                  <TableRow key={payment.paymentId}>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      {payment.paymentNumber}
+                    </TableCell>
+                    <TableCell className="font-semibold">{payment.studentName}</TableCell>
+                    <TableCell>{payment.invoiceNumber}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="font-normal">
+                        {payment.paymentMethod}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-bold text-green-600">
+                      {payment.paidAmount.toLocaleString('vi-VN')} đ
+                    </TableCell>
+                    <TableCell>
+                      {new Date(payment.paymentDate).toLocaleDateString('vi-VN')}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {payment.receivedByName}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleExportPDF(payment)}
+                        title="Tải phiếu thu"
+                      >
+                        <Download className="w-4 h-4" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Số Hóa Đơn</TableHead>
+                  <TableHead>Học Sinh</TableHead>
+                  <TableHead>Hạn Đóng</TableHead>
+                  <TableHead>Tổng Tiền</TableHead>
+                  <TableHead>Đã Đóng</TableHead>
+                  <TableHead>Trạng Thái</TableHead>
+                  <TableHead className="text-right">Thao Tác</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredInvoices.map((invoice: ApiInvoice) => (
+                  <TableRow key={invoice.invoiceId}>
+                    <TableCell className="font-semibold">
+                      {invoice.invoiceNumber}
+                    </TableCell>
+                    <TableCell>{invoice.studentName}</TableCell>
+                    <TableCell>
+                      {new Date(invoice.dueDate).toLocaleDateString('vi-VN')}
+                    </TableCell>
+                    <TableCell className="font-bold">
+                      {invoice.totalAmount.toLocaleString('vi-VN')} đ
+                    </TableCell>
+                    <TableCell className="text-green-600">
+                      {invoice.paidAmount.toLocaleString('vi-VN')} đ
+                    </TableCell>
+                    <TableCell>
+                      {getInvoiceStatusBadge(invoice.status)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleInvoiceAction(invoice)}
+                      >
+                        Chi tiết
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
